@@ -31,3 +31,9 @@ build/
 
 ### VS Code ###
 .vscode/
+
+# Local database credentials
+.env
+
+# Local application logs
+logs/

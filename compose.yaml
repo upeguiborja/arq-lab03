@@ -1,0 +1,22 @@
+services:
+  mysql:
+    image: docker.io/library/mysql:8.4
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: shopmcp
+      MYSQL_USER: ${SHOPMCP_DB_USER:?Set SHOPMCP_DB_USER in .env}
+      MYSQL_PASSWORD: ${SHOPMCP_DB_PASSWORD:?Set SHOPMCP_DB_PASSWORD in .env}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?Set MYSQL_ROOT_PASSWORD in .env}
+    ports:
+      - "127.0.0.1:3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysql --protocol=tcp -h 127.0.0.1 -u \"$${MYSQL_USER}\" -p\"$${MYSQL_PASSWORD}\" \"$${MYSQL_DATABASE}\" -e 'SELECT 1' >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+volumes:
+  mysql_data:
