@@ -20,5 +20,4 @@ public class ArqLab03Application {
                 .toolObjects(tools)
                 .build();
     }
-
 }

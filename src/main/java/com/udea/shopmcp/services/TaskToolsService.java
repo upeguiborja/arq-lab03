@@ -6,6 +6,8 @@ import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.ai.tool.annotation.ToolParam;
 import org.springframework.stereotype.Component;
 
+import java.time.LocalDate;
+import java.time.format.DateTimeParseException;
 import java.util.List;
 
 @Component
@@ -21,9 +23,19 @@ public class TaskToolsService {
         return taskRepository.findAll();
     }
 
+    @Tool(description = "Returns the total number of stored tasks.")
+    public long countTasks() {
+        return taskRepository.count();
+    }
+
     @Tool(description =  "Returns only the pending tasks.")
     public List<Task> listPending() {
         return taskRepository.findByCompleted(false);
+    }
+
+    @Tool(description = "Returns only the completed tasks.")
+    public List<Task> listCompletedTasks() {
+        return taskRepository.findByCompleted(true);
     }
 
     @Tool(description = "Search for tasks whose title contains the given fragment.")
@@ -37,13 +49,13 @@ public class TaskToolsService {
     @Tool(description = "Creates a new pending task with title and date")
     public Task createTask(
             @ToolParam(description = "Descriptive title for the task") String title,
-            @ToolParam(description = "Date, for example 2026-11-20") String date
+            @ToolParam(description = "Date in yyyy-MM-dd format, for example 2026-11-20") String date
     ) {
         if (title == null || title.isBlank()) {
             throw  new IllegalArgumentException("Title is mandatory.");
         }
 
-        return taskRepository.save(new Task(title.trim(), date, false));
+        return taskRepository.save(new Task(title.trim(), validateDate(date), false));
     }
 
     @Tool(description = "Marks a task with the given id as completed.")
@@ -60,13 +72,26 @@ public class TaskToolsService {
     public Task updateTask(
             @ToolParam(description = "Unique identifier of the task to be updated.") Long id,
             @ToolParam(description = "New title, use `null` to keep the original.") String title,
-            @ToolParam(description = "New date, use `null` to keep the original.") String date
+            @ToolParam(description = "New date in yyyy-MM-dd format, use `null` to keep the original.") String date
     ) {
         Task t = taskRepository.findById(id)
                 .orElseThrow(() -> new IllegalArgumentException("The task does not exist: " + id));
+        String validatedDate = date == null ? null : validateDate(date);
         if (title != null && !title.isBlank()) t.setTitle(title.trim());
-        if (date != null && !date.isBlank()) t.setDate(date.trim());
+        if (validatedDate != null) t.setDate(validatedDate);
         return taskRepository.save(t);
+    }
+
+    private String validateDate(String date) {
+        if (date == null || !date.matches("\\d{4}-\\d{2}-\\d{2}")) {
+            throw new IllegalArgumentException("Date must be in yyyy-MM-dd format.");
+        }
+        try {
+            LocalDate.parse(date);
+        } catch (DateTimeParseException e) {
+            throw new IllegalArgumentException("Date must be a valid calendar date in yyyy-MM-dd format.", e);
+        }
+        return date;
     }
 
     @Tool(description = "Deletes the task with the given id.")
