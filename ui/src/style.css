@@ -40,7 +40,7 @@ body { margin: 0; }
 .quantity-control { display: flex; align-items: center; border: 1px solid #777; border-radius: .6rem; }
 .quantity-control button { width: 2rem; height: 2rem; }
 .quantity-control button:disabled { opacity: .4; cursor: default; }
-.showcase, :has(> .showcase) { width: 100%; max-width: 100%; min-width: 0; }
+.showcase, .report, :has(> :is(.showcase, .report)) { width: 100%; max-width: 100%; min-width: 0; }
 .showcase .product-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 14rem), 1fr)); }
 .catalog-heading { flex-wrap: wrap; margin-bottom: 1rem; }
 .catalog-heading h2 { margin: 0; }
@@ -50,7 +50,8 @@ body { margin: 0; }
 .catalog-search input::placeholder { color: var(--shop-muted); }
 .catalog-search:focus-within { outline: 2px solid currentColor; }
 
-.tracking-card { color: var(--shop-text); }
+.product .quantity-control { justify-content: space-between; }
+.tracking-card { box-sizing: border-box; width: 100%; color: var(--shop-text); }
 .tracking-stage { display: inline-block; border-radius: 2rem; padding: .3rem .85rem; color: light-dark(#12623e, #a6efc7); background: light-dark(#e2f6e9, #233d30); }
 .tracking-steps { display: flex; padding: 0; margin: 1.25rem 0; list-style: none; }
 .market .tracking-steps li { position: relative; display: flex; flex: 1; min-width: 0; padding: 0; flex-direction: column; justify-content: flex-start; text-align: center; font-size: .78rem; }

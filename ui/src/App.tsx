@@ -84,7 +84,7 @@ function savedOrderIds() {
 
 type Cart = { product: Product; units: number }[]
 
-function Message({ message, cart, add, busy }: { message: UIMessage; cart: Cart; add: (product: Product) => void; busy: boolean }) {
+function Message({ message, cart, adjust, busy }: { message: UIMessage; cart: Cart; adjust: (product: Product, delta: number) => void; busy: boolean }) {
   const assistant = message.role === 'assistant'
   return (
     <ChatMessage sender={assistant ? 'assistant' : 'user'} avatar={assistant && <Avatar name="Asistente" size="md" />}>
@@ -94,14 +94,14 @@ function Message({ message, cart, add, busy }: { message: UIMessage; cart: Cart;
             {assistant ? <Markdown density="compact">{part.text}</Markdown> : part.text}
           </ChatMessageBubble>
         )
-        if (part.type === 'data-receipt') return <div key={index} className="market"><OrderStatus initial={part.data as Receipt} /></div>
+        if (part.type === 'data-receipt') return <div key={index} className="market report"><OrderStatus initial={part.data as Receipt} /></div>
         if (part.type === 'dynamic-tool' && part.state === 'output-available') {
           const result = toolResult(part.output)
           if (['searchInventory', 'listAvailableProducts'].includes(part.toolName) && Array.isArray(result)) {
-            return <div className="market showcase" key={part.toolCallId}><ProductList products={result} cart={cart} add={add} busy={busy} /></div>
+            return <div className="market showcase" key={part.toolCallId}><ProductList products={result} cart={cart} adjust={adjust} busy={busy} /></div>
           }
           if (['placeOrder', 'trackOrder'].includes(part.toolName) && result?.trackingId && Array.isArray(result.items)) {
-            return <div className="market" key={part.toolCallId}><OrderStatus initial={result} /></div>
+            return <div className="market report" key={part.toolCallId}><OrderStatus initial={result} /></div>
           }
         }
         if (part.type === 'dynamic-tool') return (
@@ -165,11 +165,16 @@ function Conversation({ id, reset, dark, toggleTheme }: { id: string; reset: () 
     },
   })
   const count = cart.reduce((sum, line) => sum + line.units, 0)
-  function add(product: Product) {
+  function adjust(product: Product, delta: number) {
     setCheckoutError('')
     setCart(lines => {
-      if (!lines.some(line => line.product.id === product.id)) return [...lines, { product, units: 1 }]
-      return lines.map(line => line.product.id === product.id ? { product, units: Math.min(product.quantity, line.units + 1) } : line)
+      const line = lines.find(item => item.product.id === product.id)
+      const previous = line?.units ?? 0
+      if (delta > 0 && previous >= product.quantity) return lines
+      const units = previous + delta
+      if (units <= 0) return lines.filter(item => item.product.id !== product.id)
+      if (!line) return [...lines, { product, units }]
+      return lines.map(item => item === line ? { product, units } : item)
     })
   }
   async function confirm(address: string) {
@@ -208,10 +213,7 @@ function Conversation({ id, reset, dark, toggleTheme }: { id: string; reset: () 
               <div className="drawer-content">
                 <header><h2 id="cart-title">Tu pedido</h2><button className="close-cart" aria-label="Cerrar carrito" onClick={() => drawer.current?.close()}><XMarkIcon /></button></header>
                 <OrderReview cart={cart} busy={busy || submitting} confirm={confirm}
-                  update={(id, units) => {
-                    setCheckoutError('')
-                    setCart(lines => lines.map(line => line.product.id === id ? { ...line, units } : line).filter(line => line.units > 0))
-                  }} />
+                  adjust={adjust} />
                 {checkoutError && <p role="alert">{checkoutError}</p>}
               </div>
             </dialog>
@@ -234,7 +236,7 @@ function Conversation({ id, reset, dark, toggleTheme }: { id: string; reset: () 
                   <ChatMessageBubble variant="ghost">Puedo ayudarte con tus tareas, hacer un pedido de supermercado a domicilio o consultar el estado de tus productos. ¿Qué necesitas?</ChatMessageBubble>
                   <Button label="Ver productos disponibles" size="sm" onClick={() => void sendMessage({ text: "¿Qué productos hay disponibles?" })} />
                 </ChatMessage>}
-                {messages.map(message => <Message key={message.id} message={message} cart={cart} add={add} busy={busy || submitting} />)}
+                {messages.map(message => <Message key={message.id} message={message} cart={cart} adjust={adjust} busy={busy || submitting} />)}
                 {status === 'submitted' && <ChatSystemMessage>Pensando…</ChatSystemMessage>}
               </ChatMessageList>
             </ChatLayout>

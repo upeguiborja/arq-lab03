@@ -25,10 +25,20 @@ function productImage(name: string) {
   return '/products/' + name.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase().replaceAll(' ', '-') + '.jpg'
 }
 
+type AdjustQuantity = (product: Product, delta: number) => void
+
+function QuantityControl({ product, units, busy, adjust }: Line & { busy: boolean; adjust: AdjustQuantity }) {
+  return <div className="quantity-control">
+          <button type="button" disabled={busy} aria-label={`Quitar una unidad de ${product.name}`} onClick={() => adjust(product, -1)}>−</button>
+          <output aria-label={`Cantidad de ${product.name}`}>{units}</output>
+          <button type="button" disabled={busy || units >= product.quantity} aria-label={`Agregar una unidad de ${product.name}`} onClick={() => adjust(product, 1)}>+</button>
+        </div>
+}
+
 const pageSize = 6
 
-export function ProductList({ products, cart, busy, add }: {
-  products: Product[]; cart: Line[]; busy: boolean; add: (product: Product) => void
+export function ProductList({ products, cart, busy, adjust }: {
+  products: Product[]; cart: Line[]; busy: boolean; adjust: AdjustQuantity
 }) {
   const [query, setQuery] = useState('')
   const [page, setPage] = useState(1)
@@ -46,8 +56,9 @@ export function ProductList({ products, cart, busy, add }: {
         <img loading="lazy" alt={p.name} src={productImage(p.name)}
           onError={e => { e.currentTarget.hidden = true }} />
         <small>{p.quantity} disponibles</small>
-        <Button size="sm" label={units ? `Agregar otra unidad (seleccionadas: ${units})` : 'Agregar al pedido'}
-          aria-label={`Agregar una unidad de ${p.name}`} isDisabled={busy || units >= p.quantity} onClick={() => add(p)} />
+        {units > 0 ? <QuantityControl product={p} units={units} busy={busy} adjust={adjust} /> :
+          <Button size="sm" label="Agregar al pedido" aria-label={`Agregar una unidad de ${p.name}`}
+            isDisabled={busy || p.quantity <= 0} onClick={() => adjust(p, 1)} />}
       </div></Card>
     })}</div>
     {pages > 1 && <nav className="catalog-pagination" aria-label="Páginas del catálogo">
@@ -58,19 +69,15 @@ export function ProductList({ products, cart, busy, add }: {
   </section>
 }
 
-export function OrderReview({ cart, busy, update, confirm }: {
-  cart: Line[]; busy: boolean; update: (id: number, units: number) => void; confirm: (address: string) => Promise<boolean>
+export function OrderReview({ cart, busy, adjust, confirm }: {
+  cart: Line[]; busy: boolean; adjust: AdjustQuantity; confirm: (address: string) => Promise<boolean>
 }) {
   const [address, setAddress] = useState('')
   return <div className="market drawer-order">{!cart.length ? <p>Agrega productos del catálogo.</p> :
     <form onSubmit={async e => { e.preventDefault(); if (await confirm(address.trim())) setAddress('') }}>
       <ul>{cart.map(({ product, units }) => <li key={product.id}><img src={productImage(product.name)} alt="" />
         <span>{product.name}</span>
-        <div className="quantity-control">
-          <button type="button" disabled={busy} aria-label={`Quitar una unidad de ${product.name}`} onClick={() => update(product.id, units - 1)}>−</button>
-          <output aria-label={`Cantidad de ${product.name}`}>{units}</output>
-          <button type="button" disabled={busy || units >= product.quantity} aria-label={`Agregar una unidad de ${product.name}`} onClick={() => update(product.id, units + 1)}>+</button>
-        </div></li>)}</ul>
+        <QuantityControl product={product} units={units} busy={busy} adjust={adjust} /></li>)}</ul>
       <label>Dirección de entrega<input autoComplete="street-address" maxLength={255} required disabled={busy}
         value={address} onChange={e => setAddress(e.target.value)} /></label>
       <Button type="submit" label="Confirmar pedido" isLoading={busy} isDisabled={!address.trim() || busy} />
@@ -85,19 +92,17 @@ const deliverySteps = [
 ]
 
 export function OrderStatus({ initial }: { initial: Receipt }) {
-  const [code, setCode] = useState(initial.trackingId)
   const [receipt, setReceipt] = useState(initial)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const stages = receipt.items.map(line => deliverySteps.findIndex(step => step.status === line.status))
   const current = stages.length ? Math.min(...stages) : -1
   const mixed = stages.some(stage => stage !== current)
-  async function lookup(id: string) {
+  async function refresh() {
     setBusy(true); setError('')
     try {
-      const next = await request<Receipt>('orders/' + encodeURIComponent(id.trim()))
+      const next = await request<Receipt>('orders/' + encodeURIComponent(receipt.trackingId))
       setReceipt(next)
-      setCode(next.trackingId)
     } catch (err) { setError(errorText(err)) }
     finally { setBusy(false) }
   }
@@ -112,17 +117,13 @@ export function OrderStatus({ initial }: { initial: Receipt }) {
       <p>{mixed ? 'Tus productos están en distintas etapas. Consulta el detalle de cada uno.' : deliverySteps[current]?.description}</p>
     </div>
     <div className="tracking-actions">
-      <Button size="sm" label="Actualizar estado" isDisabled={busy} onClick={() => void lookup(receipt.trackingId)} />
+      <Button size="sm" label="Actualizar estado" isDisabled={busy} onClick={() => void refresh()} />
     </div>
     <details><summary>Detalles del pedido</summary>
       <p>Código de seguimiento<br /><strong>{receipt.trackingId}</strong></p>
       <ul>{receipt.items.map(line => <li key={line.lineNumber}>{line.product} × {line.quantity}
         <Badge label={line.statusLabel} /></li>)}</ul>
-      <form onSubmit={e => { e.preventDefault(); void lookup(code) }}>
-        <label>Consultar por código<input required value={code} disabled={busy} onChange={e => setCode(e.target.value)}
-          pattern="[a-fA-F0-9]{8}(-[a-fA-F0-9]{4}){3}-[a-fA-F0-9]{12}" /></label>
-        <Button label="Consultar" type="submit" isDisabled={!code.trim() || busy} />
-      </form>
+
     </details>
     {error && <p role="alert">{error}</p>}
   </Card>
