@@ -1,0 +1,5 @@
+@import '@astryxdesign/theme-neutral/fonts.css';
+@import '@astryxdesign/core/astryx.css';
+@import '@astryxdesign/theme-neutral/theme.css';
+
+body { margin: 0; }

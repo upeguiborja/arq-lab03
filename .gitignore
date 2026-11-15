@@ -37,3 +37,5 @@ build/
 
 # Local application logs
 logs/
+ui/node_modules/
+ui/dist/
