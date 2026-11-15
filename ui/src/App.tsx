@@ -12,10 +12,52 @@ import { Button } from '@astryxdesign/core/Button'
 import { VisuallyHidden } from '@astryxdesign/core/VisuallyHidden'
 import { fetchChat } from './fetchChat.mjs'
 
+const toolLabels: Record<string, string> = {
+  listAvailableProducts: 'Ver productos disponibles',
+  searchInventory: 'Consultar inventario',
+  restockProduct: 'Registrar entrada de inventario',
+  listTasks: 'Listar tareas',
+  countTasks: 'Contar tareas',
+  listPending: 'Consultar tareas pendientes',
+  listCompletedTasks: 'Consultar tareas completadas',
+  searchTasks: 'Buscar tareas',
+  createTask: 'Crear tarea',
+  markCompleted: 'Marcar tarea como completada',
+  updateTask: 'Actualizar tarea',
+  deleteTask: 'Eliminar tarea',
+  placeOrder: 'Registrar pedido',
+  trackOrder: 'Consultar estado del pedido',
+  updateItemStatus: 'Actualizar estado de entrega',
+}
+
+const argumentLabels: Record<string, string> = {
+  productId: 'Identificador del producto', id: 'Identificador', fragment: 'Texto de búsqueda', title: 'Título', date: 'Fecha',
+  address: 'Dirección', items: 'Productos', product: 'Producto', quantity: 'Cantidad',
+  trackingId: 'Código de seguimiento', lineNumber: 'Número de línea', status: 'Estado',
+}
+
+function toolDetails(input: unknown): string | undefined {
+  if (!input || typeof input !== 'object' || !('arguments' in input) || typeof input.arguments !== 'string') return
+  try {
+    const args = JSON.parse(input.arguments)
+    return Object.entries(args)
+      .filter(([key, value]) => key in argumentLabels && value != null)
+      .map(([key, value]) => {
+        if (key === 'items' && Array.isArray(value)) {
+          return value.map(item => `${item.product} × ${item.quantity}`).join(', ')
+        }
+        return `${argumentLabels[key]}: ${value}`
+      })
+      .join(' · ')
+  } catch {
+    return undefined
+  }
+}
+
 function Message({ message }: { message: UIMessage }) {
   const assistant = message.role === 'assistant'
   return (
-    <ChatMessage sender={assistant ? 'assistant' : 'user'} avatar={assistant && <Avatar name="Assistant" size="md" />}>
+    <ChatMessage sender={assistant ? 'assistant' : 'user'} avatar={assistant && <Avatar name="Asistente" size="md" />}>
       {message.parts.map((part, index) => {
         if (part.type === 'text' && part.text) return (
           <ChatMessageBubble key={index} variant={assistant ? 'ghost' : undefined}>
@@ -24,11 +66,10 @@ function Message({ message }: { message: UIMessage }) {
         )
         if (part.type === 'dynamic-tool') return (
           <ChatToolCalls key={part.toolCallId} calls={[{
-            name: part.toolName,
-            target: part.input && typeof part.input === 'object' && 'arguments' in part.input
-              ? String(part.input.arguments) : undefined,
+            name: toolLabels[part.toolName] ?? "Operación",
+            target: toolDetails(part.input),
             status: part.state === 'output-available' ? 'complete' : part.state === 'output-error' ? 'error' : 'running',
-            errorMessage: part.state === 'output-error' ? part.errorText : undefined,
+            errorMessage: part.state === 'output-error' ? 'No se pudo completar la operación.' : undefined,
           }]} />
         )
         return null
@@ -53,7 +94,7 @@ function Conversation({ id, reset }: { id: string; reset: () => void }) {
     <VStack style={{ height: '100dvh', width: '100%' }}>
       <Layout height="fill" content={
         <LayoutContent role="main" padding={0}>
-          <VisuallyHidden as="h1">Task Assistant</VisuallyHidden>
+          <VisuallyHidden as="h1">Asistente de tareas y pedidos</VisuallyHidden>
           <VStack height="100%">
             <ChatLayout density="spacious" style={{ flex: 1, minHeight: 0 }} composer={
               <ChatComposer value={draft} onChange={setDraft} onSubmit={value => {
@@ -62,19 +103,19 @@ function Conversation({ id, reset }: { id: string; reset: () => void }) {
                 setDraft('')
                 void sendMessage({ text })
               }} onStop={stop} isStopShown={busy} input={<ChatComposerInput />}
-                placeholder="Ask about your tasks…"
-                status={draft.trim().length > 4000 ? { type: 'error', message: 'Use 4,000 characters or fewer.' }
-                  : error ? { type: 'error', message: 'The assistant could not reply. Please try again.' } : undefined}
-                footerActions={messages.length > 0 && <Button label="New conversation" variant="ghost" size="sm"
+                placeholder="Pregunta por tus tareas o pedidos…"
+                status={draft.trim().length > 4000 ? { type: 'error', message: 'Escribe un mensaje de máximo 4000 caracteres.' }
+                  : error ? { type: 'error', message: 'El asistente no pudo responder. Intenta de nuevo.' } : undefined}
+                footerActions={messages.length > 0 && <Button label="Nueva conversación" variant="ghost" size="sm"
                   onClick={() => { void stop(); reset() }} />} />
             }>
               <ChatMessageList>
-                <ChatSystemMessage variant="divider">Today</ChatSystemMessage>
-                {messages.length === 0 && <ChatMessage sender="assistant" avatar={<Avatar name="Assistant" size="md" />}>
-                  <ChatMessageBubble variant="ghost">What would you like to do with your tasks?</ChatMessageBubble>
+                <ChatSystemMessage variant="divider">Hoy</ChatSystemMessage>
+                {messages.length === 0 && <ChatMessage sender="assistant" avatar={<Avatar name="Asistente" size="md" />}>
+                  <ChatMessageBubble variant="ghost">Puedo ayudarte con tus tareas, hacer un pedido de supermercado a domicilio o consultar el estado de tus productos. ¿Qué necesitas?</ChatMessageBubble>
                 </ChatMessage>}
                 {messages.map(message => <Message key={message.id} message={message} />)}
-                {status === 'submitted' && <ChatSystemMessage>Thinking…</ChatSystemMessage>}
+                {status === 'submitted' && <ChatSystemMessage>Pensando…</ChatSystemMessage>}
               </ChatMessageList>
             </ChatLayout>
           </VStack>

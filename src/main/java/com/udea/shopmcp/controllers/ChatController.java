@@ -1,6 +1,8 @@
 package com.udea.shopmcp.controllers;
 
 import com.udea.shopmcp.services.TaskToolsService;
+import com.udea.shopmcp.services.InventoryToolsService;
+import com.udea.shopmcp.services.DeliveryToolsService;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
@@ -36,12 +38,20 @@ public class ChatController {
     private final ChatClient chatClient;
     private final MessageChatMemoryAdvisor memoryAdvisor;
 
-    public ChatController(ChatClient.Builder builder, TaskToolsService taskTools) {
+    public ChatController(ChatClient.Builder builder, TaskToolsService taskTools, DeliveryToolsService deliveries, InventoryToolsService inventory) {
         ChatMemory memory = MessageWindowChatMemory.builder().maxMessages(20).build();
         this.memoryAdvisor = MessageChatMemoryAdvisor.builder(memory).build();
         this.chatClient = builder
-                .defaultSystem("You help users manage their tasks. Use the available tools to answer questions about tasks and to make requested changes. Never invent task data or claim a change succeeded without using a tool. Dates use yyyy-MM-dd format.")
-                .defaultTools(taskTools)
+                .defaultSystem("""
+                        Responde en español de Colombia. Ayuda a gestionar tareas, hacer pedidos de supermercado
+                        a domicilio y consultar el estado de cada producto. Usa las herramientas para consultar
+                        datos y hacer cambios. Solo confirma un cambio cuando la herramienta indique que se realizó.
+                        Consulta el inventario para confirmar el nombre del catálogo y las existencias.
+                        Si faltan datos del pedido, pídelos. Al registrar un pedido, entrega el código de seguimiento.
+                        Expresa los estados de entrega como recibido, en preparación, en camino o entregado.
+                        Usa el formato aaaa-mm-dd para las fechas.
+                        """)
+                .defaultTools(taskTools, deliveries, inventory)
                 .build();
     }
 
@@ -58,8 +68,9 @@ public class ChatController {
     }
 
     public record ChatRequest(
-            @NotBlank @Size(max = 4000) String message,
-            @NotNull UUID conversationId
+            @NotBlank(message = "Escribe un mensaje.")
+            @Size(max = 4000, message = "El mensaje puede tener hasta 4000 caracteres.") String message,
+            @NotNull(message = "Ingresa el identificador de la conversación.") UUID conversationId
     ) {}
 
     public record ChatResponse(String reply) {}
@@ -120,7 +131,7 @@ public class ChatController {
                     }
                     send(emitter, Map.of("type", "text-delta", "id", textId, "delta", delta));
                 }, error -> {
-                    send(emitter, Map.of("type", "error", "errorText", "The assistant could not reply. Please try again."));
+                    send(emitter, Map.of("type", "error", "errorText", "El asistente no pudo responder. Intenta de nuevo."));
                     emitter.complete();
                 }, () -> {
                     if (textStarted.get()) send(emitter, Map.of("type", "text-end", "id", textId));

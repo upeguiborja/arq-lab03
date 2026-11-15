@@ -18,64 +18,64 @@ public class TaskToolsService {
         this.taskRepository = taskRepository;
     }
 
-    @Tool(description = "Returns the complete list of stored tasks.")
+    @Tool(description = "Lista todas las tareas guardadas.")
     public List<Task> listTasks() {
         return taskRepository.findAll();
     }
 
-    @Tool(description = "Returns the total number of stored tasks.")
+    @Tool(description = "Cuenta las tareas guardadas.")
     public long countTasks() {
         return taskRepository.count();
     }
 
-    @Tool(description =  "Returns only the pending tasks.")
+    @Tool(description =  "Lista las tareas pendientes.")
     public List<Task> listPending() {
         return taskRepository.findByCompleted(false);
     }
 
-    @Tool(description = "Returns only the completed tasks.")
+    @Tool(description = "Lista las tareas completadas.")
     public List<Task> listCompletedTasks() {
         return taskRepository.findByCompleted(true);
     }
 
-    @Tool(description = "Search for tasks whose title contains the given fragment.")
+    @Tool(description = "Busca tareas que contengan el texto indicado en el título.")
     public List<Task> searchTasks(
-            @ToolParam(description = "Text fragment to be searched in the task's title.")
+            @ToolParam(description = "Texto que se busca en el título de la tarea.")
             String fragment
     ) {
         return taskRepository.findByTitleContainingIgnoreCase(fragment);
     }
 
-    @Tool(description = "Creates a new pending task with title and date")
+    @Tool(description = "Crea una tarea pendiente con un título y una fecha.")
     public Task createTask(
-            @ToolParam(description = "Descriptive title for the task") String title,
-            @ToolParam(description = "Date in yyyy-MM-dd format, for example 2026-11-20") String date
+            @ToolParam(description = "Título de la tarea.") String title,
+            @ToolParam(description = "Fecha en formato aaaa-mm-dd, por ejemplo, 2026-11-20.") String date
     ) {
         if (title == null || title.isBlank()) {
-            throw  new IllegalArgumentException("Title is mandatory.");
+            throw  new IllegalArgumentException("El título es obligatorio.");
         }
 
         return taskRepository.save(new Task(title.trim(), validateDate(date), false));
     }
 
-    @Tool(description = "Marks a task with the given id as completed.")
+    @Tool(description = "Marca la tarea indicada como completada.")
     public Task markCompleted(
-            @ToolParam(description = "Unique identifier for the task to be marked complete.") Long id
+            @ToolParam(description = "Identificador de la tarea que se va a completar.") Long id
     ) {
         Task t = taskRepository.findById(id)
-                .orElseThrow(() -> new IllegalArgumentException("The task does not exist: " + id));
+                .orElseThrow(() -> new IllegalArgumentException("No existe la tarea con el identificador " + id));
         t.setCompleted(true);
         return taskRepository.save(t);
     }
 
-    @Tool(description = "Updates the title or date of an existing task.")
+    @Tool(description = "Actualiza el título o la fecha de una tarea.")
     public Task updateTask(
-            @ToolParam(description = "Unique identifier of the task to be updated.") Long id,
-            @ToolParam(description = "New title, use `null` to keep the original.") String title,
-            @ToolParam(description = "New date in yyyy-MM-dd format, use `null` to keep the original.") String date
+            @ToolParam(description = "Identificador de la tarea que se va a actualizar.") Long id,
+            @ToolParam(description = "Nuevo título. Usa null para conservar el título actual.") String title,
+            @ToolParam(description = "Nueva fecha en formato aaaa-mm-dd. Usa null para conservar la fecha actual.") String date
     ) {
         Task t = taskRepository.findById(id)
-                .orElseThrow(() -> new IllegalArgumentException("The task does not exist: " + id));
+                .orElseThrow(() -> new IllegalArgumentException("No existe la tarea con el identificador " + id));
         String validatedDate = date == null ? null : validateDate(date);
         if (title != null && !title.isBlank()) t.setTitle(title.trim());
         if (validatedDate != null) t.setDate(validatedDate);
@@ -84,22 +84,22 @@ public class TaskToolsService {
 
     private String validateDate(String date) {
         if (date == null || !date.matches("\\d{4}-\\d{2}-\\d{2}")) {
-            throw new IllegalArgumentException("Date must be in yyyy-MM-dd format.");
+            throw new IllegalArgumentException("Escribe la fecha en formato aaaa-mm-dd.");
         }
         try {
             LocalDate.parse(date);
         } catch (DateTimeParseException e) {
-            throw new IllegalArgumentException("Date must be a valid calendar date in yyyy-MM-dd format.", e);
+            throw new IllegalArgumentException("Escribe una fecha válida en formato aaaa-mm-dd.", e);
         }
         return date;
     }
 
-    @Tool(description = "Deletes the task with the given id.")
+    @Tool(description = "Elimina la tarea indicada.")
     public String deleteTask(
-            @ToolParam(description = "Unique identifier of the task to be deleted.") Long id
+            @ToolParam(description = "Identificador de la tarea que se va a eliminar.") Long id
     ) {
-        if (!taskRepository.existsById(id)) return "Task " + id + "does not exist.";
+        if (!taskRepository.existsById(id)) return "La tarea " + id + " no existe.";
         taskRepository.deleteById(id);
-        return "Task " + id + " deleted successfully.";
+        return "Se eliminó la tarea " + id + ".";
     }
 }
