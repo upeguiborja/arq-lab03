@@ -82,19 +82,25 @@
       input.value = '';
       addMessage(text.trim(), 'user');
       const pending = addMessage('Thinking…', 'assistant');
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 60000);
       try {
         const response = await fetch('/api/chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ message: text.trim(), conversationId })
+          body: JSON.stringify({ message: text.trim(), conversationId }),
+          signal: controller.signal
         });
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const data = await response.json();
         pending.textContent = data.reply || 'The assistant returned an empty response.';
       } catch (error) {
         pending.classList.add('error');
-        pending.textContent = 'The assistant could not reply. Please try again.';
+        pending.textContent = error.name === 'AbortError'
+          ? 'The assistant took too long to reply. Please try again.'
+          : 'The assistant could not reply. Please try again.';
       } finally {
+        clearTimeout(timeout);
         busy = false;
         send.disabled = false;
         input.focus();
