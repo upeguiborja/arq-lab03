@@ -17,6 +17,9 @@ import { ProductList, OrderReview, OrderStatus, request, errorText, type Product
 import { fetchChat } from './fetchChat.mjs'
 
 const toolLabels: Record<string, string> = {
+  listOrderIds: 'Consultar tus pedidos',
+  getCart: 'Consultar tu carrito',
+  openCart: 'Abrir tu carrito',
   listAvailableProducts: 'Ver productos disponibles',
   searchInventory: 'Consultar inventario',
   restockProduct: 'Registrar entrada de inventario',
@@ -63,6 +66,22 @@ function toolResult(output: unknown) {
   try { return JSON.parse(output) } catch { return null }
 }
 
+const orderPrefix = 'shop-order:'
+const trackingIdPattern = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i
+
+function rememberOrder(id: string) {
+  if (!trackingIdPattern.test(id)) return
+  const key = orderPrefix + id
+  if (!localStorage.getItem(key)) localStorage.setItem(key, new Date().toISOString())
+}
+
+function savedOrderIds() {
+  return Object.keys(localStorage)
+    .filter(key => key.startsWith(orderPrefix) && trackingIdPattern.test(key.slice(orderPrefix.length)))
+    .sort((a, b) => (localStorage.getItem(b) ?? '').localeCompare(localStorage.getItem(a) ?? ''))
+    .map(key => key.slice(orderPrefix.length))
+}
+
 type Cart = { product: Product; units: number }[]
 
 function Message({ message, cart, add, busy }: { message: UIMessage; cart: Cart; add: (product: Product) => void; busy: boolean }) {
@@ -105,15 +124,46 @@ function Conversation({ id, reset, dark, toggleTheme }: { id: string; reset: () 
     api: '/api/chat/stream',
     fetch: fetchChat,
     prepareSendMessagesRequest: ({ messages }) => ({
-      body: { conversationId: id, message: messages[messages.length - 1].parts
+      body: { conversationId: id, browserCartTools: true, message: messages[messages.length - 1].parts
         .filter(part => part.type === 'text').map(part => part.text).join('') },
     }),
   }), [id])
-  const { messages, setMessages, sendMessage, stop, status, error } = useChat({ id, transport })
   const [cart, setCart] = useState<Cart>([])
   const [submitting, setSubmitting] = useState(false)
   const [checkoutError, setCheckoutError] = useState('')
+  const [historyError, setHistoryError] = useState('')
+  function saveReceiptId(id: string) {
+    try { rememberOrder(id) }
+    catch { setHistoryError(`No se pudo guardar el pedido en este navegador. Conserva el código ${id}.`) }
+  }
   const drawer = useRef<HTMLDialogElement>(null)
+  const { messages, setMessages, sendMessage, stop, status, error } = useChat({
+    id, transport,
+    onData(part) {
+      if (part.type === 'data-order-placed') {
+        const receipt = toolResult(part.data)
+        if (receipt?.trackingId) saveReceiptId(receipt.trackingId)
+        return
+      }
+      if (part.type !== 'data-browser-tool') return
+      const { callId, tool } = part.data as { callId: string; tool: string }
+      if (tool !== 'getCart' && tool !== 'openCart' && tool !== 'listOrderIds') return
+      if (tool === 'openCart' && !drawer.current?.open) drawer.current?.showModal()
+      let result
+      try {
+        result = tool === 'listOrderIds'
+          ? { orderIds: savedOrderIds() }
+          : { items: cart.map(({ product, units }) => ({ product: product.name, quantity: units })) }
+      } catch {
+        setHistoryError('No se pudo leer el historial de pedidos en este navegador.')
+        result = {}
+      }
+      // The stream stays open while the server waits for this call's result.
+      void fetch('/api/chat/browser-results/' + encodeURIComponent(callId), {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(result),
+      }).catch(() => { /* The pending tool reports a timeout to the agent. */ })
+    },
+  })
   const count = cart.reduce((sum, line) => sum + line.units, 0)
   function add(product: Product) {
     setCheckoutError('')
@@ -128,6 +178,7 @@ function Conversation({ id, reset, dark, toggleTheme }: { id: string; reset: () 
     try {
       const receipt = await request<Receipt>('orders', { method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ address, items: cart.map(line => ({ product: line.product.name, quantity: line.units })) }) })
+      saveReceiptId(receipt.trackingId)
       setMessages(previous => [...previous, { id: crypto.randomUUID(), role: 'assistant', parts: [{ type: 'data-receipt', data: receipt }] }])
       drawer.current?.close()
       setCart([])
@@ -151,6 +202,7 @@ function Conversation({ id, reset, dark, toggleTheme }: { id: string; reset: () 
                 <ShoppingCartIcon /><span className="cart-count">{count}</span>
               </button>
             </header>
+            {historyError && <p role="alert">{historyError}</p>}
             <dialog ref={drawer} className="cart-drawer" aria-labelledby="cart-title"
               onClick={event => { if (event.target === drawer.current) drawer.current.close() }}>
               <div className="drawer-content">

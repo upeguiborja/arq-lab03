@@ -25,6 +25,11 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import org.springframework.http.ResponseEntity;
 
+import jakarta.validation.constraints.Positive;
+import org.springframework.web.bind.annotation.PathVariable;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
 import java.io.IOException;
 import java.util.List;
 import java.util.Map;
@@ -36,6 +41,7 @@ import reactor.core.Disposable;
 @RestController
 @RequestMapping("/api/chat")
 public class ChatController {
+    private final Map<UUID, CompletableFuture<BrowserResult>> pendingBrowserCalls = new ConcurrentHashMap<>();
     private final ChatClient chatClient;
     private final MessageChatMemoryAdvisor memoryAdvisor;
 
@@ -73,10 +79,41 @@ public class ChatController {
     public record ChatRequest(
             @NotBlank(message = "Escribe un mensaje.")
             @Size(max = 4000, message = "El mensaje puede tener hasta 4000 caracteres.") String message,
-            @NotNull(message = "Ingresa el identificador de la conversación.") UUID conversationId
+            @NotNull(message = "Ingresa el identificador de la conversación.") UUID conversationId, boolean browserCartTools
     ) {}
 
     public record ChatResponse(String reply) {}
+
+    public record CartItem(@NotBlank @Size(max = 255) String product, @Positive int quantity) {}
+    public record BrowserResult(@Size(max = 1000) List<@NotNull @Valid CartItem> items, List<@NotNull UUID> orderIds) {}
+
+    @PostMapping("/browser-results/{callId}")
+    public ResponseEntity<Void> browserResult(@PathVariable UUID callId, @Valid @RequestBody BrowserResult result) {
+        var pending = pendingBrowserCalls.get(callId);
+        if (pending == null || !pending.complete(result)) return ResponseEntity.notFound().build();
+        return ResponseEntity.noContent().build();
+    }
+
+    private Object callBrowser(SseEmitter emitter, String tool) {
+        UUID callId = UUID.randomUUID();
+        var pending = new CompletableFuture<BrowserResult>();
+        pendingBrowserCalls.put(callId, pending);
+        try {
+            send(emitter, Map.of("type", "data-browser-tool", "transient", true,
+                    "data", Map.of("callId", callId, "tool", tool)));
+            var result = pending.get(10, TimeUnit.SECONDS);
+            if (tool.equals("listOrderIds") && result.orderIds() != null) return Map.of("orderIds", result.orderIds());
+            if (!tool.equals("listOrderIds") && result.items() != null) return Map.of("items", result.items());
+            return Map.of("error", "El navegador no devolvió los datos solicitados.");
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            return Map.of("error", "Se interrumpió la consulta al navegador.");
+        } catch (java.util.concurrent.ExecutionException | java.util.concurrent.TimeoutException unavailable) {
+            return Map.of("error", "El navegador no respondió. No se pudieron confirmar los datos solicitados.");
+        } finally {
+            pendingBrowserCalls.remove(callId);
+        }
+    }
 
     @PostMapping(value = "/stream", produces = "text/event-stream")
     public ResponseEntity<SseEmitter> stream(@Valid @RequestBody ChatRequest request) {
@@ -114,6 +151,10 @@ public class ChatController {
                 for (var call : calls) {
                     var reply = replies.stream().filter(item -> item.name().equals(call.getKey().name())
                             && item.id().equals(call.getKey().id())).findFirst();
+                    if (call.getKey().name().equals("placeOrder") && reply.isPresent()) {
+                        send(emitter, Map.of("type", "data-order-placed", "transient", true,
+                                "data", reply.get().responseData()));
+                    }
                     send(emitter, Map.of("type", "tool-output-available", "toolCallId", call.getValue(),
                             "output", reply.map(ToolResponseMessage.ToolResponse::responseData).orElse("")));
                 }
@@ -125,13 +166,17 @@ public class ChatController {
                 .build();
 
         send(emitter, Map.of("type", "start", "messageId", messageId));
-        subscription.set(chatClient.prompt()
+        var prompt = chatClient.prompt()
                 .system(SYSTEM_PROMPT + "La interfaz muestra los resultados de inventario y seguimiento como tarjetas. Resume la respuesta sin repetir toda la lista.")
                 .user(request.message().trim())
                 .advisors(advisors -> advisors.advisors(memoryAdvisor, toolAdvisor)
-                        .param(ChatMemory.CONVERSATION_ID, request.conversationId().toString()))
-                .stream()
+                        .param(ChatMemory.CONVERSATION_ID, request.conversationId().toString()));
+        if (request.browserCartTools()) {
+            prompt.tools(new BrowserCartTools(tool -> callBrowser(emitter, tool)));
+        }
+        subscription.set(prompt.stream()
                 .content()
+                .subscribeOn(reactor.core.scheduler.Schedulers.boundedElastic())
                 .subscribe(delta -> {
                     if (delta == null || delta.isEmpty()) return;
                     if (textStarted.compareAndSet(false, true)) {

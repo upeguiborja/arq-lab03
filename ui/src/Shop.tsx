@@ -1,12 +1,12 @@
 import { useState } from 'react'
-import { MagnifyingGlassIcon } from '@heroicons/react/24/outline'
+import { MagnifyingGlassIcon, ClipboardDocumentCheckIcon, BuildingStorefrontIcon, TruckIcon, HomeIcon } from '@heroicons/react/24/outline'
 import { Button } from '@astryxdesign/core/Button'
 import { Badge } from '@astryxdesign/core/Badge'
 import { Card } from '@astryxdesign/core/Card'
 
 export type Product = { id: number; name: string; description: string; quantity: number }
 type Line = { product: Product; units: number }
-export type Receipt = { trackingId: string; items: { lineNumber: number; product: string; quantity: number; statusLabel: string }[] }
+export type Receipt = { trackingId: string; items: { lineNumber: number; product: string; quantity: number; status: string; statusLabel: string }[] }
 
 export async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const response = await fetch('/api/shop/' + path, { cache: 'no-store', ...options })
@@ -77,25 +77,53 @@ export function OrderReview({ cart, busy, update, confirm }: {
     </form>}</div>
 }
 
-export function OrderStatus({ initial }: { initial: Receipt | null }) {
-  const [code, setCode] = useState(initial?.trackingId ?? '')
+const deliverySteps = [
+  { status: 'ORDERED', label: 'Recibido', icon: ClipboardDocumentCheckIcon, description: 'Recibimos tu pedido.' },
+  { status: 'PREPARING', label: 'En preparación', icon: BuildingStorefrontIcon, description: 'Estamos preparando tus productos.' },
+  { status: 'OUT_FOR_DELIVERY', label: 'En camino', icon: TruckIcon, description: 'Tu pedido está en camino.' },
+  { status: 'DELIVERED', label: 'Entregado', icon: HomeIcon, description: 'Todos tus productos fueron entregados.' },
+]
+
+export function OrderStatus({ initial }: { initial: Receipt }) {
+  const [code, setCode] = useState(initial.trackingId)
   const [receipt, setReceipt] = useState(initial)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
-  return <Card><h2>Seguimiento del pedido</h2>
-    <form onSubmit={async e => {
-      e.preventDefault(); setBusy(true); setError('')
-      try { setReceipt(await request<Receipt>('orders/' + encodeURIComponent(code.trim()))) }
-      catch (err) { setReceipt(null); setError(errorText(err)) }
-      finally { setBusy(false) }
-    }}>
-      <label>Código de seguimiento<input required value={code} disabled={busy} onChange={e => setCode(e.target.value)}
-        pattern="[a-fA-F0-9]{8}(-[a-fA-F0-9]{4}){3}-[a-fA-F0-9]{12}" title="Ingresa el código completo del pedido, incluidos los guiones." /></label>
-      <Button label="Consultar estado" type="submit" isDisabled={!code.trim() || busy} isLoading={busy} />
-    </form>{error && <p role="alert">{error}</p>}
-    {receipt && <div aria-live="polite"><p>Código del pedido: <strong>{receipt.trackingId}</strong></p>
+  const stages = receipt.items.map(line => deliverySteps.findIndex(step => step.status === line.status))
+  const current = stages.length ? Math.min(...stages) : -1
+  const mixed = stages.some(stage => stage !== current)
+  async function lookup(id: string) {
+    setBusy(true); setError('')
+    try {
+      const next = await request<Receipt>('orders/' + encodeURIComponent(id.trim()))
+      setReceipt(next)
+      setCode(next.trackingId)
+    } catch (err) { setError(errorText(err)) }
+    finally { setBusy(false) }
+  }
+  return <Card className="tracking-card">
+    <h2>Seguimiento del pedido</h2>
+    <div aria-live="polite">
+      <strong className="tracking-stage">{deliverySteps[current]?.label ?? 'Estado pendiente'}</strong>
+      <ol className="tracking-steps" aria-label="Progreso del pedido">
+        {deliverySteps.map(({ label, icon: Icon }, i) => <li key={label} className={i <= current ? 'reached' : ''}
+          aria-current={i === current ? 'step' : undefined}><span><Icon aria-hidden="true" /></span>{label}</li>)}
+      </ol>
+      <p>{mixed ? 'Tus productos están en distintas etapas. Consulta el detalle de cada uno.' : deliverySteps[current]?.description}</p>
+    </div>
+    <div className="tracking-actions">
+      <Button size="sm" label="Actualizar estado" isDisabled={busy} onClick={() => void lookup(receipt.trackingId)} />
+    </div>
+    <details><summary>Detalles del pedido</summary>
+      <p>Código de seguimiento<br /><strong>{receipt.trackingId}</strong></p>
       <ul>{receipt.items.map(line => <li key={line.lineNumber}>{line.product} × {line.quantity}
-        <Badge label={line.statusLabel} /></li>)}</ul></div>}
+        <Badge label={line.statusLabel} /></li>)}</ul>
+      <form onSubmit={e => { e.preventDefault(); void lookup(code) }}>
+        <label>Consultar por código<input required value={code} disabled={busy} onChange={e => setCode(e.target.value)}
+          pattern="[a-fA-F0-9]{8}(-[a-fA-F0-9]{4}){3}-[a-fA-F0-9]{12}" /></label>
+        <Button label="Consultar" type="submit" isDisabled={!code.trim() || busy} />
+      </form>
+    </details>
+    {error && <p role="alert">{error}</p>}
   </Card>
 }
-

@@ -49,3 +49,15 @@ body { margin: 0; }
 .catalog-search input { background: transparent; color: inherit; border: 0; min-width: 0; outline: none; }
 .catalog-search input::placeholder { color: var(--shop-muted); }
 .catalog-search:focus-within { outline: 2px solid currentColor; }
+
+.tracking-card { color: var(--shop-text); }
+.tracking-stage { display: inline-block; border-radius: 2rem; padding: .3rem .85rem; color: light-dark(#12623e, #a6efc7); background: light-dark(#e2f6e9, #233d30); }
+.tracking-steps { display: flex; padding: 0; margin: 1.25rem 0; list-style: none; }
+.market .tracking-steps li { position: relative; display: flex; flex: 1; min-width: 0; padding: 0; flex-direction: column; justify-content: flex-start; text-align: center; font-size: .78rem; }
+.tracking-steps li + li::before { content: ''; position: absolute; height: .22rem; width: 100%; top: 1.12rem; right: 50%; background: light-dark(#dededc, #494b50); }
+.tracking-steps li.reached::before { background: var(--shop-text); }
+.tracking-steps li span { z-index: 1; display: grid; place-items: center; border-radius: 50%; width: 2.5rem; height: 2.5rem; background: light-dark(#efefed, #494b50); }
+.tracking-steps li.reached span { background: var(--shop-text); color: var(--shop-surface); }
+.tracking-steps svg { width: 1.35rem; }
+.tracking-card details { margin-top: .85rem; }
+.tracking-card summary { cursor: pointer; font-weight: 600; }
