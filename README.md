@@ -2,7 +2,9 @@
 
 **Curso:** Arquitectura de Software  
 **Programa:** Ingeniería de Sistemas – Universidad de Antioquia  
-**Autor:** Mateo Upegui Borja · [Correo institucional](mailto:mateo.upeguib@udea.edu.co)
+**Autor:** Mateo Upegui Borja · <[mateo.upeguib@udea.edu.co](mailto:mateo.upeguib@udea.edu.co)>.
+
+https://github.com/user-attachments/assets/aab0d346-757b-4e35-b4cb-4c560b67a95e
 
 ## 1. Introducción
 
