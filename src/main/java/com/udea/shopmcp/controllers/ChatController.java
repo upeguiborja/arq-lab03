@@ -16,6 +16,7 @@ import org.springframework.ai.model.tool.ToolCallingChatOptions;
 import org.springframework.ai.model.tool.ToolCallingManager;
 import org.springframework.ai.model.tool.ToolExecutionResult;
 import org.springframework.ai.chat.prompt.Prompt;
+import org.springframework.ai.chat.messages.ToolResponseMessage;
 import org.springframework.ai.tool.definition.ToolDefinition;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -42,7 +43,12 @@ public class ChatController {
         ChatMemory memory = MessageWindowChatMemory.builder().maxMessages(20).build();
         this.memoryAdvisor = MessageChatMemoryAdvisor.builder(memory).build();
         this.chatClient = builder
-                .defaultSystem("""
+                .defaultSystem(SYSTEM_PROMPT)
+                .defaultTools(taskTools, deliveries, inventory)
+                .build();
+    }
+
+    private static final String SYSTEM_PROMPT = """
                         Responde en español de Colombia. Ayuda a gestionar tareas, hacer pedidos de supermercado
                         a domicilio y consultar el estado de cada producto. Usa las herramientas para consultar
                         datos y hacer cambios. Solo confirma un cambio cuando la herramienta indique que se realizó.
@@ -50,10 +56,7 @@ public class ChatController {
                         Si faltan datos del pedido, pídelos. Al registrar un pedido, entrega el código de seguimiento.
                         Expresa los estados de entrega como recibido, en preparación, en camino o entregado.
                         Usa el formato aaaa-mm-dd para las fechas.
-                        """)
-                .defaultTools(taskTools, deliveries, inventory)
-                .build();
-    }
+                        """;
 
     @PostMapping
     public ChatResponse chat(@Valid @RequestBody ChatRequest request) {
@@ -106,9 +109,13 @@ public class ChatController {
                             "dynamic", true, "providerExecuted", true));
                 }
                 ToolExecutionResult result = delegate.executeToolCalls(prompt, response);
+                var replies = result.conversationHistory().getLast() instanceof ToolResponseMessage message
+                        ? message.getResponses() : List.<ToolResponseMessage.ToolResponse>of();
                 for (var call : calls) {
+                    var reply = replies.stream().filter(item -> item.name().equals(call.getKey().name())
+                            && item.id().equals(call.getKey().id())).findFirst();
                     send(emitter, Map.of("type", "tool-output-available", "toolCallId", call.getValue(),
-                            "output", Map.of("status", "completed")));
+                            "output", reply.map(ToolResponseMessage.ToolResponse::responseData).orElse("")));
                 }
                 return result;
             }
@@ -119,6 +126,7 @@ public class ChatController {
 
         send(emitter, Map.of("type", "start", "messageId", messageId));
         subscription.set(chatClient.prompt()
+                .system(SYSTEM_PROMPT + "La interfaz muestra los resultados de inventario y seguimiento como tarjetas. Resume la respuesta sin repetir toda la lista.")
                 .user(request.message().trim())
                 .advisors(advisors -> advisors.advisors(memoryAdvisor, toolAdvisor)
                         .param(ChatMemory.CONVERSATION_ID, request.conversationId().toString()))

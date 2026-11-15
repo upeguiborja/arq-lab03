@@ -1,6 +1,9 @@
 // Adapted from the Astryx AI chat conversation template.
 // Copyright (c) Meta Platforms, Inc. and affiliates.
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
+import { Theme } from '@astryxdesign/core/theme'
+import { neutralTheme } from '@astryxdesign/theme-neutral/built'
+import { MoonIcon, SunIcon, ShoppingCartIcon, XMarkIcon } from '@heroicons/react/24/outline'
 import { useChat } from '@ai-sdk/react'
 import { DefaultChatTransport, type UIMessage } from 'ai'
 import { VStack, Layout, LayoutContent } from '@astryxdesign/core/Layout'
@@ -10,6 +13,7 @@ import { Avatar } from '@astryxdesign/core/Avatar'
 import { Markdown } from '@astryxdesign/core/Markdown'
 import { Button } from '@astryxdesign/core/Button'
 import { VisuallyHidden } from '@astryxdesign/core/VisuallyHidden'
+import { ProductList, OrderReview, OrderStatus, request, errorText, type Product, type Receipt } from './Shop'
 import { fetchChat } from './fetchChat.mjs'
 
 const toolLabels: Record<string, string> = {
@@ -54,7 +58,14 @@ function toolDetails(input: unknown): string | undefined {
   }
 }
 
-function Message({ message }: { message: UIMessage }) {
+function toolResult(output: unknown) {
+  if (typeof output !== 'string') return output
+  try { return JSON.parse(output) } catch { return null }
+}
+
+type Cart = { product: Product; units: number }[]
+
+function Message({ message, cart, add, busy }: { message: UIMessage; cart: Cart; add: (product: Product) => void; busy: boolean }) {
   const assistant = message.role === 'assistant'
   return (
     <ChatMessage sender={assistant ? 'assistant' : 'user'} avatar={assistant && <Avatar name="Asistente" size="md" />}>
@@ -64,6 +75,16 @@ function Message({ message }: { message: UIMessage }) {
             {assistant ? <Markdown density="compact">{part.text}</Markdown> : part.text}
           </ChatMessageBubble>
         )
+        if (part.type === 'data-receipt') return <div key={index} className="market"><OrderStatus initial={part.data as Receipt} /></div>
+        if (part.type === 'dynamic-tool' && part.state === 'output-available') {
+          const result = toolResult(part.output)
+          if (['searchInventory', 'listAvailableProducts'].includes(part.toolName) && Array.isArray(result)) {
+            return <div className="market showcase" key={part.toolCallId}><ProductList products={result} cart={cart} add={add} busy={busy} /></div>
+          }
+          if (['placeOrder', 'trackOrder'].includes(part.toolName) && result?.trackingId && Array.isArray(result.items)) {
+            return <div className="market" key={part.toolCallId}><OrderStatus initial={result} /></div>
+          }
+        }
         if (part.type === 'dynamic-tool') return (
           <ChatToolCalls key={part.toolCallId} calls={[{
             name: toolLabels[part.toolName] ?? "Operación",
@@ -78,7 +99,7 @@ function Message({ message }: { message: UIMessage }) {
   )
 }
 
-function Conversation({ id, reset }: { id: string; reset: () => void }) {
+function Conversation({ id, reset, dark, toggleTheme }: { id: string; reset: () => void; dark: boolean; toggleTheme: () => void }) {
   const [draft, setDraft] = useState('')
   const transport = useMemo(() => new DefaultChatTransport({
     api: '/api/chat/stream',
@@ -88,7 +109,32 @@ function Conversation({ id, reset }: { id: string; reset: () => void }) {
         .filter(part => part.type === 'text').map(part => part.text).join('') },
     }),
   }), [id])
-  const { messages, sendMessage, stop, status, error } = useChat({ id, transport })
+  const { messages, setMessages, sendMessage, stop, status, error } = useChat({ id, transport })
+  const [cart, setCart] = useState<Cart>([])
+  const [submitting, setSubmitting] = useState(false)
+  const [checkoutError, setCheckoutError] = useState('')
+  const drawer = useRef<HTMLDialogElement>(null)
+  const count = cart.reduce((sum, line) => sum + line.units, 0)
+  function add(product: Product) {
+    setCheckoutError('')
+    setCart(lines => {
+      if (!lines.some(line => line.product.id === product.id)) return [...lines, { product, units: 1 }]
+      return lines.map(line => line.product.id === product.id ? { product, units: Math.min(product.quantity, line.units + 1) } : line)
+    })
+  }
+  async function confirm(address: string) {
+    if (!cart.length || submitting || busy) return false
+    setSubmitting(true); setCheckoutError('')
+    try {
+      const receipt = await request<Receipt>('orders', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ address, items: cart.map(line => ({ product: line.product.name, quantity: line.units })) }) })
+      setMessages(previous => [...previous, { id: crypto.randomUUID(), role: 'assistant', parts: [{ type: 'data-receipt', data: receipt }] }])
+      drawer.current?.close()
+      setCart([])
+      return true
+    } catch (err) { setCheckoutError(errorText(err)); return false }
+    finally { setSubmitting(false) }
+  }
   const busy = status === 'submitted' || status === 'streaming'
   return (
     <VStack style={{ height: '100dvh', width: '100%' }}>
@@ -96,25 +142,47 @@ function Conversation({ id, reset }: { id: string; reset: () => void }) {
         <LayoutContent role="main" padding={0}>
           <VisuallyHidden as="h1">Asistente de tareas y pedidos</VisuallyHidden>
           <VStack height="100%">
+            <header className="shop-toolbar">
+              <button className="theme-toggle" type="button" aria-label="Tema oscuro" aria-pressed={dark}
+                title={dark ? 'Cambiar a tema claro' : 'Cambiar a tema oscuro'} onClick={toggleTheme}>
+                {dark ? <SunIcon /> : <MoonIcon />}
+              </button>
+              <button className="cart-trigger" aria-label={`Abrir carrito, ${count} unidades`} aria-haspopup="dialog" onClick={() => drawer.current?.showModal()}>
+                <ShoppingCartIcon /><span className="cart-count">{count}</span>
+              </button>
+            </header>
+            <dialog ref={drawer} className="cart-drawer" aria-labelledby="cart-title"
+              onClick={event => { if (event.target === drawer.current) drawer.current.close() }}>
+              <div className="drawer-content">
+                <header><h2 id="cart-title">Tu pedido</h2><button className="close-cart" aria-label="Cerrar carrito" onClick={() => drawer.current?.close()}><XMarkIcon /></button></header>
+                <OrderReview cart={cart} busy={busy || submitting} confirm={confirm}
+                  update={(id, units) => {
+                    setCheckoutError('')
+                    setCart(lines => lines.map(line => line.product.id === id ? { ...line, units } : line).filter(line => line.units > 0))
+                  }} />
+                {checkoutError && <p role="alert">{checkoutError}</p>}
+              </div>
+            </dialog>
             <ChatLayout density="spacious" style={{ flex: 1, minHeight: 0 }} composer={
               <ChatComposer value={draft} onChange={setDraft} onSubmit={value => {
                 const text = value.trim()
-                if (!text || busy || text.length > 4000) return
+                if (!text || submitting || busy || text.length > 4000) return
                 setDraft('')
                 void sendMessage({ text })
               }} onStop={stop} isStopShown={busy} input={<ChatComposerInput />}
                 placeholder="Pregunta por tus tareas o pedidos…"
                 status={draft.trim().length > 4000 ? { type: 'error', message: 'Escribe un mensaje de máximo 4000 caracteres.' }
                   : error ? { type: 'error', message: 'El asistente no pudo responder. Intenta de nuevo.' } : undefined}
-                footerActions={messages.length > 0 && <Button label="Nueva conversación" variant="ghost" size="sm"
+                footerActions={messages.length > 0 && <Button isDisabled={submitting} label="Nueva conversación" variant="ghost" size="sm"
                   onClick={() => { void stop(); reset() }} />} />
             }>
               <ChatMessageList>
                 <ChatSystemMessage variant="divider">Hoy</ChatSystemMessage>
                 {messages.length === 0 && <ChatMessage sender="assistant" avatar={<Avatar name="Asistente" size="md" />}>
                   <ChatMessageBubble variant="ghost">Puedo ayudarte con tus tareas, hacer un pedido de supermercado a domicilio o consultar el estado de tus productos. ¿Qué necesitas?</ChatMessageBubble>
+                  <Button label="Ver productos disponibles" size="sm" onClick={() => void sendMessage({ text: "¿Qué productos hay disponibles?" })} />
                 </ChatMessage>}
-                {messages.map(message => <Message key={message.id} message={message} />)}
+                {messages.map(message => <Message key={message.id} message={message} cart={cart} add={add} busy={busy || submitting} />)}
                 {status === 'submitted' && <ChatSystemMessage>Pensando…</ChatSystemMessage>}
               </ChatMessageList>
             </ChatLayout>
@@ -127,5 +195,15 @@ function Conversation({ id, reset }: { id: string; reset: () => void }) {
 
 export default function App() {
   const [id, setId] = useState(() => crypto.randomUUID())
-  return <Conversation key={id} id={id} reset={() => setId(crypto.randomUUID())} />
+  const [dark, setDark] = useState(() => {
+    const saved = localStorage.getItem('shop-theme')
+    return saved ? saved === 'dark' : window.matchMedia('(prefers-color-scheme: dark)').matches
+  })
+  function toggleTheme() {
+    setDark(!dark)
+    localStorage.setItem('shop-theme', dark ? 'light' : 'dark')
+  }
+  return <Theme theme={neutralTheme} mode={dark ? 'dark' : 'light'}>
+    <Conversation key={id} id={id} reset={() => setId(crypto.randomUUID())} dark={dark} toggleTheme={toggleTheme} />
+  </Theme>
 }
